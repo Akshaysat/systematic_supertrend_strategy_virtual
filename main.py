@@ -12,11 +12,6 @@ from urllib.parse import urlparse, parse_qs
 import numpy as np
 import toml
 
-config = toml.load("pyproject.toml")
-
-# bot_token = "1733931112:AAGdRjwf10J9L2-Pg6SZ4o2eLq_nQu7Dze0"
-bot_token = config["telegram"]["bot_token"]
-
 
 def send_message_telegram(chat_id, text):
     url = "https://api.telegram.org/bot{}/sendMessage".format(bot_token)
@@ -31,18 +26,6 @@ def send_message_telegram(chat_id, text):
 
 
 def fyers_login():
-
-    # user details
-    user_id = config["fyers"]["user_id"]
-    client_id = config["fyers"]["client_id"]
-    secret_key = config["fyers"]["secret_key"]
-    redirect_uri = config["fyers"]["redirect_uri"]
-    totp_token = config["fyers"]["totp_token"]
-    pin = config["fyers"]["pin"]
-    response_type = "code"
-    grant_type = "authorization_code"
-    state = "private"
-    nonce = "private"
 
     # create a session
     session = accessToken.SessionModel(
@@ -331,13 +314,31 @@ def find_option_strike(nearest_premium, option_type):
             closest_key = key
             closest_diff = diff
 
-    # final_strike = max((key for key in opt_strike_dict if opt_strike_dict[key] < nearest_premium), key=opt_strike_dict.get)
-    # print(opt_strike_dict)
     return closest_key
 
 
-# Code to create a fyers object
+# ---------------------------#
+
+# load the config file
+config = toml.load("pyproject.toml")
+
+# bot_token = "1733931112:AAGdRjwf10J9L2-Pg6SZ4o2eLq_nQu7Dze0"
+bot_token = config["telegram"]["bot_token"]
+
+# user details
+user_id = config["fyers"]["user_id"]
 client_id = config["fyers"]["client_id"]
+secret_key = config["fyers"]["secret_key"]
+redirect_uri = config["fyers"]["redirect_uri"]
+totp_token = config["fyers"]["totp_token"]
+pin = config["fyers"]["pin"]
+response_type = "code"
+grant_type = "authorization_code"
+state = "private"
+nonce = "private"
+
+
+# Code to create a fyers object
 
 is_async = False
 token_object = get_token("akshay")
@@ -388,6 +389,7 @@ bnfut_symbol = (
 )
 
 # Find latest weekly expiry date
+
 weekly_expiry_date_epoch = (
     derivatives_list[
         (derivatives_list["Instrument"] == "BANKNIFTY")
@@ -401,6 +403,7 @@ weekly_expiry_date = dt.datetime.fromtimestamp(weekly_expiry_date_epoch).strftim
 )
 
 # Find the expiry sub-symbol
+
 YY = weekly_expiry_date[2:4]
 MM = weekly_expiry_date[5:7]
 dd = weekly_expiry_date[-2:]
@@ -517,80 +520,90 @@ while (
 
 # Send PNL to telegram group at 03:15 PM
 
-data = []
-mongo_url = config["mongo_db"]["mongo_url"]
-mongo = MongoClient(mongo_url)
-mydb = mongo["test"]
-pnl_col = mydb["systematic-strategy-sss"]
+if (
+    dt.datetime.now().strftime("%H:%M:%S") >= "15:14:00"
+    and dt.datetime.now().strftime("%H:%M:%S") <= "15:16:00"
+):
 
-if pe_position["flag"] == 2:
-    pe_position["pnl"] = round(
-        (pe_position["entry_price"] - pe_position["sl_price"]) * pe_position["qty"], 2
-    )
+    data = []
+    mongo_url = config["mongo_db"]["mongo_url"]
+    mongo = MongoClient(mongo_url)
+    mydb = mongo["test"]
+    pnl_col = mydb["systematic-strategy-sss"]
 
-    data.append(pe_position)
+    if pe_position["flag"] == 2:
+        pe_position["pnl"] = round(
+            (pe_position["entry_price"] - pe_position["sl_price"]) * pe_position["qty"],
+            2,
+        )
 
-    print(f'PE PNL for {pe_position["strike"]}: Rs. {pe_position["pnl"]}')
-    send_message_telegram(
-        "-1001825639727",
-        f'PE PNL for\n{pe_position["strike"]}\nRs. {pe_position["pnl"]}',
-    )
+        data.append(pe_position)
 
-elif pe_position["flag"] == 1:
+        print(f'PE PNL for {pe_position["strike"]}: Rs. {pe_position["pnl"]}')
+        send_message_telegram(
+            "-1001825639727",
+            f'PE PNL for\n{pe_position["strike"]}\nRs. {pe_position["pnl"]}',
+        )
 
-    pe_position["exit_price"] = get_ltp(pe_position["strike"])
-    pe_position["pnl"] = round(
-        (pe_position["entry_price"] - pe_position["exit_price"]) * pe_position["qty"], 2
-    )
-    pe_position["exit_time"] = dt.datetime.now()
-    pe_position["exit_type"] = "TIME-SQ-OFF"
+    elif pe_position["flag"] == 1:
 
-    data.append(pe_position)
+        pe_position["exit_price"] = get_ltp(pe_position["strike"])
+        pe_position["pnl"] = round(
+            (pe_position["entry_price"] - pe_position["exit_price"])
+            * pe_position["qty"],
+            2,
+        )
+        pe_position["exit_time"] = dt.datetime.now()
+        pe_position["exit_type"] = "TIME-SQ-OFF"
 
-    print(f'PE PNL for {pe_position["strike"]}: Rs. {pe_position["pnl"]}')
-    send_message_telegram(
-        "-1001825639727",
-        f'PE PNL for\n{pe_position["strike"]}\nRs. {pe_position["pnl"]}',
-    )
+        data.append(pe_position)
 
-else:
-    print("No PE Position Today")
-    send_message_telegram("-1001825639727", "No PE Position Today")
+        print(f'PE PNL for {pe_position["strike"]}: Rs. {pe_position["pnl"]}')
+        send_message_telegram(
+            "-1001825639727",
+            f'PE PNL for\n{pe_position["strike"]}\nRs. {pe_position["pnl"]}',
+        )
 
+    else:
+        print("No PE Position Today")
+        send_message_telegram("-1001825639727", "No PE Position Today")
 
-if ce_position["flag"] == 2:
-    ce_position["pnl"] = round(
-        (ce_position["entry_price"] - ce_position["sl_price"]) * ce_position["qty"], 2
-    )
+    if ce_position["flag"] == 2:
+        ce_position["pnl"] = round(
+            (ce_position["entry_price"] - ce_position["sl_price"]) * ce_position["qty"],
+            2,
+        )
 
-    data.append(ce_position)
+        data.append(ce_position)
 
-    print(f'CE PNL for {ce_position["strike"]}: Rs. {ce_position["pnl"]}')
-    send_message_telegram(
-        "-1001825639727",
-        f'CE PNL for\n{ce_position["strike"]}\nRs. {ce_position["pnl"]}',
-    )
+        print(f'CE PNL for {ce_position["strike"]}: Rs. {ce_position["pnl"]}')
+        send_message_telegram(
+            "-1001825639727",
+            f'CE PNL for\n{ce_position["strike"]}\nRs. {ce_position["pnl"]}',
+        )
 
-elif ce_position["flag"] == 1:
+    elif ce_position["flag"] == 1:
 
-    ce_position["exit_price"] = get_ltp(ce_position["strike"])
-    ce_position["pnl"] = round(
-        (ce_position["entry_price"] - ce_position["exit_price"]) * ce_position["qty"], 2
-    )
-    ce_position["exit_time"] = dt.datetime.now()
-    ce_position["exit_type"] = "TIME-SQ-OFF"
+        ce_position["exit_price"] = get_ltp(ce_position["strike"])
+        ce_position["pnl"] = round(
+            (ce_position["entry_price"] - ce_position["exit_price"])
+            * ce_position["qty"],
+            2,
+        )
+        ce_position["exit_time"] = dt.datetime.now()
+        ce_position["exit_type"] = "TIME-SQ-OFF"
 
-    data.append(ce_position)
+        data.append(ce_position)
 
-    print(f'CE PNL for {ce_position["strike"]}: Rs. {ce_position["pnl"]}')
-    send_message_telegram(
-        "-1001825639727",
-        f'CE PNL for\n{ce_position["strike"]}\nRs. {ce_position["pnl"]}',
-    )
+        print(f'CE PNL for {ce_position["strike"]}: Rs. {ce_position["pnl"]}')
+        send_message_telegram(
+            "-1001825639727",
+            f'CE PNL for\n{ce_position["strike"]}\nRs. {ce_position["pnl"]}',
+        )
 
-else:
-    print("No CE Position Today")
-    send_message_telegram("-1001825639727", "No CE Position Today")
+    else:
+        print("No CE Position Today")
+        send_message_telegram("-1001825639727", "No CE Position Today")
 
-# insert positions data into database
-pnl_col.insert_many(data)
+    # insert positions data into database
+    pnl_col.insert_many(data)
