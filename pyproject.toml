@@ -10,5 +10,5 @@ redirect_uri = "https://127.0.0.1"
 totp_token = "2AGVWA4LCIUWVDQ433KPJ35N44ADR2ZX"
 pin = "1234"
 
-[mongodb]
+[mongo_db]
 mongo_url = "mongodb://akshay:Learnapp1234@cluster0-shard-00-00.9hpry.mongodb.net:27017,cluster0-shard-00-01.9hpry.mongodb.net:27017,cluster0-shard-00-02.9hpry.mongodb.net:27017/myFirstDatabase?ssl=true&replicaSet=atlas-9goxcz-shard-0&authSource=admin&retryWrites=true&w=majority"

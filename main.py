@@ -423,7 +423,7 @@ pe_position["flag"] = 0
 
 while (
     dt.datetime.now().strftime("%H:%M:%S") >= "09:20:00"
-    and dt.datetime.now().strftime("%H:%M:%S") <= "16:57:00"
+    and dt.datetime.now().strftime("%H:%M:%S") <= "15:15:00"
 ):
 
     try:
@@ -519,7 +519,6 @@ while (
         continue
 
 # Send PNL to telegram group at 03:15 PM
-
 if (
     dt.datetime.now().strftime("%H:%M:%S") >= "15:14:00"
     and dt.datetime.now().strftime("%H:%M:%S") <= "15:16:00"
