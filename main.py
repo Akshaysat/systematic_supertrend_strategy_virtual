@@ -10,8 +10,12 @@ import datetime as dt
 import pyotp
 from urllib.parse import urlparse, parse_qs
 import numpy as np
+import toml
 
-bot_token = "1733931112:AAGdRjwf10J9L2-Pg6SZ4o2eLq_nQu7Dze0"
+config = toml.load("pyproject.toml")
+
+# bot_token = "1733931112:AAGdRjwf10J9L2-Pg6SZ4o2eLq_nQu7Dze0"
+bot_token = config["telegram"]["bot_token"]
 
 
 def send_message_telegram(chat_id, text):
@@ -29,9 +33,12 @@ def send_message_telegram(chat_id, text):
 def fyers_login():
 
     # user details
-    client_id = "HJ2321XETS-100"
-    secret_key = "E5YVX47DYK"
-    redirect_uri = "https://127.0.0.1"
+    user_id = config["fyers"]["user_id"]
+    client_id = config["fyers"]["client_id"]
+    secret_key = config["fyers"]["secret_key"]
+    redirect_uri = config["fyers"]["redirect_uri"]
+    totp_token = config["fyers"]["totp_token"]
+    pin = config["fyers"]["pin"]
     response_type = "code"
     grant_type = "authorization_code"
     state = "private"
@@ -61,7 +68,7 @@ def fyers_login():
     }
     with requests.Session() as s:
 
-        body = {"fy_id": "DA00190", "app_id": "2"}
+        body = {"fy_id": user_id, "app_id": "2"}
         r = s.request(
             "POST",
             "https://api-t2.fyers.in/vagator/v2/send_login_otp",
@@ -70,7 +77,7 @@ def fyers_login():
             allow_redirects=True,
         )
 
-        totp = pyotp.TOTP("2AGVWA4LCIUWVDQ433KPJ35N44ADR2ZX").now()
+        totp = pyotp.TOTP(totp_token).now()
         request_key = r.json()["request_key"]
         body = {"request_key": request_key, "otp": totp}
         r = s.request(
@@ -81,7 +88,6 @@ def fyers_login():
             allow_redirects=True,
         )
 
-        pin = "1234"
         request_key = r.json()["request_key"]
         body = {"request_key": request_key, "identity_type": "pin", "identifier": pin}
         r = s.request(
@@ -146,9 +152,8 @@ def fyers_login():
         # print(fyers.get_profile())
 
         # save token in the database
-        mongo = MongoClient(
-            "mongodb://akshay:Learnapp1234@cluster0-shard-00-00.9hpry.mongodb.net:27017,cluster0-shard-00-01.9hpry.mongodb.net:27017,cluster0-shard-00-02.9hpry.mongodb.net:27017/myFirstDatabase?ssl=true&replicaSet=atlas-9goxcz-shard-0&authSource=admin&retryWrites=true&w=majority"
-        )
+        mongo_url = config["mongo_db"]["mongo_url"]
+        mongo = MongoClient(mongo_url)
         mydb = mongo["test"]
         coll = mydb["tokens-akshay"]
 
@@ -159,9 +164,8 @@ def fyers_login():
 
 # Function to login to fyers account and get token from database
 def get_token(name):
-    mongo = MongoClient(
-        "mongodb://akshay:Learnapp1234@cluster0-shard-00-00.9hpry.mongodb.net:27017,cluster0-shard-00-01.9hpry.mongodb.net:27017,cluster0-shard-00-02.9hpry.mongodb.net:27017/myFirstDatabase?ssl=true&replicaSet=atlas-9goxcz-shard-0&authSource=admin&retryWrites=true&w=majority"
-    )
+    mongo_url = config["mongo_db"]["mongo_url"]
+    mongo = MongoClient(mongo_url)
     mydb = mongo["test"]
 
     coll_name = "tokens-" + str(name)
@@ -308,20 +312,15 @@ def find_option_strike(nearest_premium, option_type):
         & (derivatives_list["Option type"] == option_type)
     ]["Symbol ticker"].to_list()
 
-    opt_strike_str_1 = ",".join(opt_strike[:40])
-    opt_strike_str_2 = ",".join(opt_strike[40:80])
-    opt_strike_str_3 = ",".join(opt_strike[80:])
+    count = round(len(opt_strike) / 40) + 1
 
     opt_strike_dict = {}
 
-    for i in fyers.quotes({"symbols": opt_strike_str_1})["d"]:
-        opt_strike_dict[i["n"]] = i["v"]["lp"]
+    for c in range(count):
+        opt_strike_str = ",".join(opt_strike[c * 40 : c * 40 + 40])
 
-    for i in fyers.quotes({"symbols": opt_strike_str_2})["d"]:
-        opt_strike_dict[i["n"]] = i["v"]["lp"]
-
-    for i in fyers.quotes({"symbols": opt_strike_str_3})["d"]:
-        opt_strike_dict[i["n"]] = i["v"]["lp"]
+        for i in fyers.quotes({"symbols": opt_strike_str})["d"]:
+            opt_strike_dict[i["n"]] = i["v"]["lp"]
 
     closest_key = None
     closest_diff = None
@@ -338,7 +337,7 @@ def find_option_strike(nearest_premium, option_type):
 
 
 # Code to create a fyers object
-client_id = "HJ2321XETS-100"
+client_id = config["fyers"]["client_id"]
 
 is_async = False
 token_object = get_token("akshay")
@@ -519,10 +518,8 @@ while (
 # Send PNL to telegram group at 03:15 PM
 
 data = []
-
-mongo = MongoClient(
-    "mongodb://akshay:Learnapp1234@cluster0-shard-00-00.9hpry.mongodb.net:27017,cluster0-shard-00-01.9hpry.mongodb.net:27017,cluster0-shard-00-02.9hpry.mongodb.net:27017/myFirstDatabase?ssl=true&replicaSet=atlas-9goxcz-shard-0&authSource=admin&retryWrites=true&w=majority"
-)
+mongo_url = config["mongo_db"]["mongo_url"]
+mongo = MongoClient(mongo_url)
 mydb = mongo["test"]
 pnl_col = mydb["systematic-strategy-sss"]
 
