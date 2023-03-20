@@ -277,8 +277,20 @@ def supertrend(df, atr_period, multiplier):
 
 
 # Function to find ltp of an instrument
-def get_ltp(symbol):
-    return fyers.quotes({"symbols": symbol})["d"][0]["v"]["lp"]
+def get_ltp(**kwargs):
+
+    if kwargs.get("sl_price") is not None:
+
+        sl_price = kwargs["sl_price"]
+        ltp_new = fyers.quotes({"symbols": kwargs["symbol"]})["d"][0]["v"]["lp"]
+
+        if sl_price <= ltp_new:
+            ltp_new = fyers.quotes({"symbols": kwargs["symbol"]})["d"][0]["v"]["lp"]
+
+    else:
+        ltp_new = fyers.quotes({"symbols": kwargs["symbol"]})["d"][0]["v"]["lp"]
+
+    return ltp_new
 
 
 # Function to create trading symbol
@@ -430,16 +442,22 @@ while (
 
         df = get_data(bnfut_symbol)
         df["Supertrend"] = supertrend(df, 10, 3)
+        # print(f"CE: {ce_position}")
+        # print(f"PE: {pe_position}")
+
         close_value = df.iloc[-1]["Close"]
         supertrend_value = df.iloc[-1]["Supertrend"]
 
         # Main Entry
         if close_value > supertrend_value and pe_position["flag"] == 0:
+
+            pe_position["trade_date"] = dt.datetime.now().strftime("%Y-%m-%d")
             pe_position["strike"] = find_option_strike(100, "PE")
-            pe_position["entry_price"] = get_ltp(pe_position["strike"])
+            pe_position["entry_price"] = get_ltp(symbol=pe_position["strike"])
             pe_position["sl_price"] = round(pe_position["entry_price"] * 1.5 * 20) / 20
             pe_position["qty"] = 25
             pe_position["entry_time"] = dt.datetime.now()
+            pe_position["pnl_movement"] = [{dt.datetime.now().strftime("%H:%M:%S"): 0}]
 
             print(f'SHORT: {pe_position["strike"]} at {pe_position["entry_price"]}')
             send_message_telegram(
@@ -456,11 +474,14 @@ while (
             continue
 
         if close_value < supertrend_value and ce_position["flag"] == 0:
+
+            ce_position["trade_date"] = dt.datetime.now().strftime("%Y-%m-%d")
             ce_position["strike"] = find_option_strike(100, "CE")
-            ce_position["entry_price"] = get_ltp(ce_position["strike"])
+            ce_position["entry_price"] = get_ltp(symbol=ce_position["strike"])
             ce_position["sl_price"] = round(ce_position["entry_price"] * 1.5 * 20) / 20
             ce_position["qty"] = 25
             ce_position["entry_time"] = dt.datetime.now()
+            ce_position["pnl_movement"] = [{dt.datetime.now().strftime("%H:%M:%S"): 0}]
 
             print(f'SHORT: {ce_position["strike"]} at {ce_position["entry_price"]}')
             send_message_telegram(
@@ -479,7 +500,16 @@ while (
         # SL Check
         if pe_position["flag"] == 1:
 
-            pe_strike_ltp = get_ltp(pe_position["strike"])
+            pe_strike_ltp = get_ltp(
+                symbol=pe_position["strike"], sl_price=pe_position["sl_price"]
+            )
+            pe_position["pnl_movement"].append(
+                {
+                    dt.datetime.now().strftime("%H:%M:%S"): round(
+                        (pe_position["entry_price"] - pe_strike_ltp) * 25, 2
+                    )
+                }
+            )
             print(pe_strike_ltp)
 
             if pe_strike_ltp >= pe_position["sl_price"]:
@@ -488,6 +518,14 @@ while (
                 pe_position["exit_price"] = pe_position["sl_price"]
                 pe_position["exit_time"] = dt.datetime.now()
                 pe_position["exit_type"] = "SL-HIT"
+                pe_position["pnl_movement"].append(
+                    {
+                        dt.datetime.now().strftime("%H:%M:%S"): round(
+                            (pe_position["entry_price"] - pe_position["sl_price"]) * 25,
+                            2,
+                        )
+                    }
+                )
 
                 print(f'SL HIT: {pe_position["strike"]} at {pe_position["sl_price"]}')
                 send_message_telegram(
@@ -497,7 +535,16 @@ while (
 
         if ce_position["flag"] == 1:
 
-            ce_strike_ltp = get_ltp(ce_position["strike"])
+            ce_strike_ltp = get_ltp(
+                symbol=ce_position["strike"], sl_price=ce_position["sl_price"]
+            )
+            ce_position["pnl_movement"].append(
+                {
+                    dt.datetime.now().strftime("%H:%M:%S"): round(
+                        (ce_position["entry_price"] - ce_strike_ltp) * 25, 2
+                    )
+                }
+            )
             print(ce_strike_ltp)
 
             if ce_strike_ltp >= ce_position["sl_price"]:
@@ -506,6 +553,14 @@ while (
                 ce_position["exit_price"] = ce_position["sl_price"]
                 ce_position["exit_time"] = dt.datetime.now()
                 ce_position["exit_type"] = "SL-HIT"
+                ce_position["pnl_movement"].append(
+                    {
+                        dt.datetime.now().strftime("%H:%M:%S"): round(
+                            (ce_position["entry_price"] - ce_position["sl_price"]) * 25,
+                            2,
+                        )
+                    }
+                )
 
                 print(f'SL HIT: {ce_position["strike"]} at {ce_position["sl_price"]}')
                 send_message_telegram(
@@ -513,96 +568,93 @@ while (
                     f'SL HIT\n{ce_position["strike"]}\n@ {ce_position["sl_price"]}',
                 )
 
+        # get out of the loop if both the SL's are hit
+        if ce_position["flag"] == 2 and pe_position["flag"] == 2:
+            break
+
         time.sleep(5)
 
     except:
         continue
 
 # Send PNL to telegram group at 03:15 PM
-if (
-    dt.datetime.now().strftime("%H:%M:%S") >= "15:14:00"
-    and dt.datetime.now().strftime("%H:%M:%S") <= "15:16:00"
-):
 
-    data = []
-    mongo_url = config["mongo_db"]["mongo_url"]
-    mongo = MongoClient(mongo_url)
-    mydb = mongo["test"]
-    pnl_col = mydb["systematic-strategy-sss"]
+data = []
 
-    if pe_position["flag"] == 2:
-        pe_position["pnl"] = round(
-            (pe_position["entry_price"] - pe_position["sl_price"]) * pe_position["qty"],
-            2,
-        )
+mongo = MongoClient(
+    "mongodb://akshay:Learnapp1234@cluster0-shard-00-00.9hpry.mongodb.net:27017,cluster0-shard-00-01.9hpry.mongodb.net:27017,cluster0-shard-00-02.9hpry.mongodb.net:27017/myFirstDatabase?ssl=true&replicaSet=atlas-9goxcz-shard-0&authSource=admin&retryWrites=true&w=majority"
+)
+mydb = mongo["test"]
+pnl_col = mydb["systematic-strategy-sss"]
 
-        data.append(pe_position)
+if pe_position["flag"] == 2:
+    pe_position["pnl"] = round(
+        (pe_position["entry_price"] - pe_position["sl_price"]) * pe_position["qty"], 2
+    )
 
-        print(f'PE PNL for {pe_position["strike"]}: Rs. {pe_position["pnl"]}')
-        send_message_telegram(
-            "-1001825639727",
-            f'PE PNL for\n{pe_position["strike"]}\nRs. {pe_position["pnl"]}',
-        )
+    data.append(pe_position)
 
-    elif pe_position["flag"] == 1:
+    print(f'PE PNL for {pe_position["strike"]}: Rs. {pe_position["pnl"]}')
+    send_message_telegram(
+        "-1001825639727",
+        f'PE PNL for\n{pe_position["strike"]}\nRs. {pe_position["pnl"]}',
+    )
 
-        pe_position["exit_price"] = get_ltp(pe_position["strike"])
-        pe_position["pnl"] = round(
-            (pe_position["entry_price"] - pe_position["exit_price"])
-            * pe_position["qty"],
-            2,
-        )
-        pe_position["exit_time"] = dt.datetime.now()
-        pe_position["exit_type"] = "TIME-SQ-OFF"
+elif pe_position["flag"] == 1:
 
-        data.append(pe_position)
+    pe_position["exit_price"] = get_ltp(pe_position["strike"])
+    pe_position["pnl"] = round(
+        (pe_position["entry_price"] - pe_position["exit_price"]) * pe_position["qty"], 2
+    )
+    pe_position["exit_time"] = dt.datetime.now()
+    pe_position["exit_type"] = "TIME-SQ-OFF"
 
-        print(f'PE PNL for {pe_position["strike"]}: Rs. {pe_position["pnl"]}')
-        send_message_telegram(
-            "-1001825639727",
-            f'PE PNL for\n{pe_position["strike"]}\nRs. {pe_position["pnl"]}',
-        )
+    data.append(pe_position)
 
-    else:
-        print("No PE Position Today")
-        send_message_telegram("-1001825639727", "No PE Position Today")
+    print(f'PE PNL for {pe_position["strike"]}: Rs. {pe_position["pnl"]}')
+    send_message_telegram(
+        "-1001825639727",
+        f'PE PNL for\n{pe_position["strike"]}\nRs. {pe_position["pnl"]}',
+    )
 
-    if ce_position["flag"] == 2:
-        ce_position["pnl"] = round(
-            (ce_position["entry_price"] - ce_position["sl_price"]) * ce_position["qty"],
-            2,
-        )
+else:
+    print("No PE Position Today")
+    send_message_telegram("-1001825639727", "No PE Position Today")
 
-        data.append(ce_position)
 
-        print(f'CE PNL for {ce_position["strike"]}: Rs. {ce_position["pnl"]}')
-        send_message_telegram(
-            "-1001825639727",
-            f'CE PNL for\n{ce_position["strike"]}\nRs. {ce_position["pnl"]}',
-        )
+if ce_position["flag"] == 2:
+    ce_position["pnl"] = round(
+        (ce_position["entry_price"] - ce_position["sl_price"]) * ce_position["qty"], 2
+    )
 
-    elif ce_position["flag"] == 1:
+    data.append(ce_position)
 
-        ce_position["exit_price"] = get_ltp(ce_position["strike"])
-        ce_position["pnl"] = round(
-            (ce_position["entry_price"] - ce_position["exit_price"])
-            * ce_position["qty"],
-            2,
-        )
-        ce_position["exit_time"] = dt.datetime.now()
-        ce_position["exit_type"] = "TIME-SQ-OFF"
+    print(f'CE PNL for {ce_position["strike"]}: Rs. {ce_position["pnl"]}')
+    send_message_telegram(
+        "-1001825639727",
+        f'CE PNL for\n{ce_position["strike"]}\nRs. {ce_position["pnl"]}',
+    )
 
-        data.append(ce_position)
+elif ce_position["flag"] == 1:
 
-        print(f'CE PNL for {ce_position["strike"]}: Rs. {ce_position["pnl"]}')
-        send_message_telegram(
-            "-1001825639727",
-            f'CE PNL for\n{ce_position["strike"]}\nRs. {ce_position["pnl"]}',
-        )
+    ce_position["exit_price"] = get_ltp(ce_position["strike"])
+    ce_position["pnl"] = round(
+        (ce_position["entry_price"] - ce_position["exit_price"]) * ce_position["qty"], 2
+    )
+    ce_position["exit_time"] = dt.datetime.now()
+    ce_position["exit_type"] = "TIME-SQ-OFF"
 
-    else:
-        print("No CE Position Today")
-        send_message_telegram("-1001825639727", "No CE Position Today")
+    data.append(ce_position)
 
-    # insert positions data into database
-    pnl_col.insert_many(data)
+    print(f'CE PNL for {ce_position["strike"]}: Rs. {ce_position["pnl"]}')
+    send_message_telegram(
+        "-1001825639727",
+        f'CE PNL for\n{ce_position["strike"]}\nRs. {ce_position["pnl"]}',
+    )
+
+else:
+    print("No CE Position Today")
+    send_message_telegram("-1001825639727", "No CE Position Today")
+
+# insert positions data into database
+pnl_col.insert_many(data)
